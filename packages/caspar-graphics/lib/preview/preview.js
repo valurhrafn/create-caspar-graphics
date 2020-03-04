@@ -2,7 +2,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import Caspar from '../caspar'
 import Screen from './screen'
-import { States } from '../constants'
+import { States } from '../caspar'
 import Editor from './editor'
 import Button from './button'
 import Controls from './controls'
@@ -28,6 +28,7 @@ export default class Preview extends React.Component {
 
   onDataChange = data => {
     this.setState({ data })
+    this.state.cg.update(data)
   }
 
   onStateChange = state => {

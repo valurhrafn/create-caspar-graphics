@@ -1,216 +1,162 @@
 import React from 'react'
-import { getQueryData } from './utils/parse'
 import { addCasparMethods, removeCasparMethods } from './utils/caspar-methods'
-import { isProduction, States } from './constants'
-import scaleToFit from './utils/scale-to-fit'
-import TransitionGroup from 'react-addons-transition-group'
-import FirstChild from './utils/first-child'
+import lottie from 'lottie-web'
 
-export default class Caspar extends React.Component {
-  static getDerivedStateFromProps(props, state) {
-    // NOTE: This can only happen in development (from preview).
-    // New data from props. Treat it as if a "normal" update() occured.
-    if (props.data && props.data !== state.data) {
-      const message = `.update(${JSON.stringify(props.data || {}, null, 2)})`
-      console.log(`${props.name || 'caspar'}${message}`)
-      return { data: props.data }
-    }
+export const States = {
+  playing: 'PLAYING',
+  paused: 'PAUSED',
+  stopped: 'STOPPED'
+}
 
-    return null
-  }
+const caspar = {}
 
-  constructor(props) {
-    super()
+const Caspar = React.forwardRef(({ template, name }, ref) => {
+  const node = React.useRef()
+  const animation = React.useRef()
+  const [state, setState] = React.useState(null)
+  const [data, setData] = React.useState(null)
+  const duration = animation.current?.getDuration(true) || null
+  const end = template.lottieData.markers.find(({ cm }) => cm != null)
 
-    this.state = {
-      state: States.loading,
-      data: props.data || getQueryData(),
-      didError: false,
-      visibleReference: false,
-      referenceImage: null
-    }
+  const videoLayers = template.lottieData.layers.filter(layer => layer.ty === 9)
 
-    if (process.env.NODE_ENV !== 'production') {
-      try {
-        this.state.referenceImage = require(`${process.env.DEV_TEMPLATES_DIR}/${
-          props.name
-        }/reference.jpg`)
-      } catch (e) {
-        console.log('No reference image found')
-      }
-    }
+  console.log({ videoLayers })
 
-    if (this.state.data._fit) {
-      scaleToFit()
-    }
-
-    addCasparMethods(this)
-  }
-
-  componentDidCatch(error, info) {
-    this.log(error)
-    this.setState({ didError: true })
-  }
-
-  onKeyDown = evt => {
-    const fn = {
-      F1: this.stop,
-      F2: this.play,
-      F3: this.load,
-      F4: this.pause,
-      F6: this.update,
-      F7: this.preview,
-      F9: this.toggleReference
-    }[evt.key]
-    fn && fn()
-  }
-
-  componentDidMount() {
-    document.addEventListener('keydown', this.onKeyDown)
-
-    if (this.props.autoPreview || this.state.data._autoPreview) {
-      this.preview()
-    }
-  }
-
-  componentWillUnmount() {
-    removeCasparMethods(this)
-    document.removeEventListener('keydown', this.onKeyDown)
-  }
-
-  log = (message, ...rest) => {
-    console.log(`${this.props.name || 'caspar'}${message}`)
+  const log = (message, ...rest) => {
+    console.log(`${name || 'caspar'}${message}`)
     rest && rest.length && console.log(rest)
   }
 
-  update = (data = this.props.data || {}) => {
-    this.log(`.update(${JSON.stringify(data || {}, null, 2)})`)
-    this.setState({ data })
-  }
+  const createAnimation = (data, autoplay = false) => {
+    if (animation.current) {
+      animation.current.destroy()
+    }
 
-  load = () => {
-    this.log('.load()')
-    this.setState({ state: States.loaded })
-  }
-
-  preview = () => {
-    this.log('.preview()')
-    this.setState({
-      state: States.playing,
-      data: this.props.data || {
-        ...(this.props.template.previewData || {}),
-        ...(getQueryData() || {})
+    for (let i = 0, f = 0; i < template.lottieData.layers.length; i++) {
+      if (!data || data['f' + f] == null) {
+        continue
       }
+
+      if (template.lottieData.layers[i]?.t?.d?.k[0]?.s) {
+        template.lottieData.layers[i].t.d.k[0].s.t = data['f' + f]
+        f++
+      }
+    }
+
+    animation.current = lottie.loadAnimation({
+      container: node.current,
+      renderer: 'svg',
+      loop: false,
+      autoplay,
+      animationData: template.lottieData
     })
-  }
 
-  play = () => {
-    this.log('.play()')
-    this.setState(state => ({
-      state: States.playing,
-      data: state.data || {}
-    }))
-  }
-
-  pause = () => {
-    this.log('.pause()')
-    this.setState({ state: States.paused })
-  }
-
-  stop = () => {
-    this.log('.stop()')
-    this.setState({ state: States.stopping })
-  }
-
-  toggleReference = () => {
-    if (isProduction) return
-
-    if (!this.state.referenceImage) {
-      return alert(
-        `BEWARE! There\'s no reference image. Set an image findable at 'src/templates/${
-          this.props.name
-        }/reference.jpg' and try again.`
-      )
-    }
-
-    this.setState({ visibleReference: !this.state.visibleReference })
-  }
-
-  componentDidLeave = () => {
-    this.setState({ state: States.stopped })
-    this.remove()
-  }
-
-  remove = () => {
-    this.log('.remove()')
-    // TODO: Uncomment when caspar can handle it.
-    // setTimeout(() => window.remove && window.remove(), 100)
-  }
-
-  componentDidUpdate(prevProps, prevState) {
-    // Notify listeners about changes in Caspar state.
-    if (this.props.onStateChange && prevState.state !== this.state.state) {
-      this.props.onStateChange(this.state.state)
-    }
-
-    // HACK: notify clients about the stopping state before starting
-    // the unmounting process (once it's started, no prop updates will
-    // propagate, but cDU is still called with old props).
-    if (this.state.state === States.stopping) {
-      this.setState({ state: States.willStop })
+    // Stop at end marker.
+    if (end && end.tm) {
+      animation.current.onEnterFrame = frame => {
+        if (frame.currentTime + 0.5 >= end.tm) {
+          animation.current.pause()
+          animation.current.onEnterFrame = null
+        }
+      }
     }
   }
 
-  render() {
-    const { template: Template } = this.props
-    const {
-      state,
-      data,
-      didError,
-      visibleReference,
-      referenceImage
-    } = this.state
-    const shouldRender =
-      !didError && state !== States.willStop && state !== States.stopped
+  const animateOff = onComplete => {
+    if (!animation.current) {
+      return
+    }
 
-    const mode = process.env.MODE
-    const is720 = mode && mode.startsWith('720')
-    const modeWidth = is720 ? 1280 : 1920
+    // No end animation has been specified (no end marker), run the animation
+    // backwards at 1.5x speed.
+    if (!end?.tm || Math.abs(end.tm - animation.current.currentFrame) >= 0.5) {
+      animation.current.setDirection('-1')
+      animation.current.setSpeed(1.5)
+    }
 
-    return (
-      <div
-        style={{
-          background:
-            data._bg != null
-              ? data._bg === true
-                ? '#5ebb78'
-                : data._bg
-              : 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          position: 'relative',
-          height: '100%',
-          width: '100%'
-        }}
-      >
-        <TransitionGroup component={FirstChild}>
-          {shouldRender && <Template data={data} state={state} />}
-        </TransitionGroup>
+    animation.current.play()
 
-        {!isProduction &&
-          referenceImage && (
-            <div
-              style={{
-                position: 'absolute',
-                pointerEvents: 'none',
-                display: visibleReference ? 'flex' : 'none',
-                opacity: 0.5
-              }}
-            >
-              <img src={referenceImage} width={modeWidth} height="100%" />
-            </div>
-          )}
-      </div>
-    )
+    animation.current.onComplete = () => {
+      animation.current.destroy()
+      animation.current = null
+
+      if (onComplete) {
+        onComplete()
+      }
+    }
   }
-}
+
+  // New data.
+  React.useEffect(() => {
+    if (state === States.playing) {
+      animateOff(() => {
+        createAnimation(data, true)
+      })
+    } else {
+      createAnimation(data)
+    }
+  }, [data])
+
+  // Update player.
+  React.useEffect(() => {
+    // Play
+    if (state === States.playing) {
+      if (!animation.current) {
+        createAnimation()
+      }
+
+      animation.current.play()
+    }
+
+    // Pause
+    if (state === States.paused && animation.current) {
+      animation.current.pause()
+    }
+
+    // Stop
+    if (state === States.stopped) {
+      animateOff(() => {
+        log('.remove()')
+      })
+    }
+  }, [state])
+
+  // Bind caspar methods.
+  React.useLayoutEffect(() => {
+    caspar.load = () => {
+      log('.load()')
+    }
+
+    caspar.update = data => {
+      log(`.update(${JSON.stringify(data || {}, null, 2)})`)
+      setData(data)
+    }
+
+    caspar.play = () => {
+      log('.play()')
+      setState(States.playing)
+    }
+
+    caspar.pause = () => {
+      log('.pause()')
+      setState(States.paused)
+    }
+
+    caspar.stop = () => {
+      log('.stop()')
+      setState(States.stopped)
+    }
+
+    addCasparMethods(caspar)
+
+    return () => {
+      removeCasparMethods(caspar)
+    }
+  }, [])
+
+  React.useImperativeHandle(ref, () => caspar, [caspar])
+
+  return <div ref={node} style={{ height: '100%', width: '100%' }} />
+})
+
+export default Caspar
